@@ -11,7 +11,7 @@ import sys
 import time
 import typing as t
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
@@ -207,13 +207,15 @@ class CmfConfig:
     @classmethod
     def from_env(cls) -> "CmfConfig":
         """Retrieve CMF configuration from environment."""
-        return cls(
+        config = cls(
             filename=os.environ.get("CMF_URI", None),
             pipeline_name=os.environ.get("CMF_PIPELINE", None),
             pipeline_stage=os.environ.get("CMF_STAGE", None),
             graph=_str_to_bool(os.environ.get("CMF_GRAPH", None)),
             is_server=_str_to_bool(os.environ.get("CMF_IS_SERVER", None)),
         )
+        print(f"CmfConfig.from_env config={asdict(config)}")
+        return config
 
     @classmethod
     def from_params(cls, **kwargs) -> "CmfConfig":
@@ -313,6 +315,7 @@ def step(
                     "environmental variable `export CMF_PIPELINE=iris` in linux or `set CMF_PIPELINE=iris` in Windows. "
                     "Option 2: use step annotator's `pipeline_name` parameter, e.g., `@step(pipeline_name=iris)`"
                 )
+            print(f"Auto-logging API v01 effective config={asdict(config)}.")
 
             # Get context, parameters and input artifacts
             ctx, params, inputs = _validate_task_arguments(args, kwargs)
