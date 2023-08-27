@@ -327,6 +327,7 @@ def step(
                 filename=config.filename,
                 pipeline_name=config.pipeline_name,
                 graph=config.graph,
+                is_server=config.is_server
             )
             _ = cmf.create_context(pipeline_stage=config.pipeline_stage)
             _ = cmf.create_execution(
