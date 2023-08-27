@@ -20,7 +20,11 @@ import dvc.api
 import dvc.exceptions
 
 
+_CMF_EXPERIMENTAL_NO_GIT_DVC: bool = os.environ.get("CMF_EXPERIMENTAL_NO_GIT_DVC", None) in ("yes", "1", "true")
+
+
 def check_git_remote() -> bool:
+    """Called in pre-checks when is_server is False."""
     process = ""
     commit = ""
     git_remote_configured = False
@@ -41,6 +45,7 @@ def check_git_remote() -> bool:
 
 
 def check_default_remote() -> bool:
+    """Called in pre-checks when is_server is False."""
     process = ""
     commit = ""
     dvc_configured = False
@@ -61,6 +66,8 @@ def check_default_remote() -> bool:
 
 
 def dvc_get_url(folder: str, retry: bool = False, repo: str = "") -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     url = ""
     try:
         if not repo and not repo.isspace():
@@ -80,6 +87,8 @@ def dvc_get_url(folder: str, retry: bool = False, repo: str = "") -> str:
 
 
 def dvc_get_hash(folder: str, repo: str = "") -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     c_hash = ""
     try:
         url = dvc_get_url(folder, False, repo)
@@ -95,7 +104,7 @@ def dvc_get_hash(folder: str, repo: str = "") -> str:
 
 
 def check_git_repo() -> bool:
-
+    """Called in pre-checks when is_server is False."""
     process = ""
     commit = ""
     is_git_repo = False
@@ -117,7 +126,8 @@ def check_git_repo() -> bool:
 
 
 def git_checkout_new_branch(branch_name: str):
-
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return
     process = ""
     commit = ""
     try:
@@ -144,6 +154,8 @@ def git_checkout_new_branch(branch_name: str):
 
 
 def git_get_commit() -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     process = ""
     commit = ""
     try:
@@ -163,6 +175,8 @@ def git_get_commit() -> str:
 
 
 def commit_dvc_lock_file(file_path: str, execution_id) -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     process = ""
     try:
@@ -200,6 +214,8 @@ def commit_dvc_lock_file(file_path: str, execution_id) -> str:
     return commit
 
 def git_commit(execution_id: str) -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     process = None
     try:
@@ -227,6 +243,8 @@ def git_commit(execution_id: str) -> str:
     return commit
 
 def commit_output(folder: str, execution_id: str) -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     process = ""
     try:
@@ -274,6 +292,8 @@ def commit_output(folder: str, execution_id: str) -> str:
 
 # Get the remote repo
 def git_get_repo() -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     process = ""
     output = ""
@@ -294,6 +314,8 @@ def git_get_repo() -> str:
 
 #Initialise git with quiet option
 def git_quiet_init() -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['git', 'init', '-q'],
@@ -314,6 +336,8 @@ def git_quiet_init() -> str:
 
 # Initial git commit
 def git_initial_commit() -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['git', 'commit', '-q', '--allow-empty', '-n', '-m', "Initial code commit"],
@@ -333,6 +357,8 @@ def git_initial_commit() -> str:
 
 # Add a remote repo url
 def git_add_remote(git_url) -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['git', 'remote', 'add', 'cmf_origin', f"{git_url}"],
@@ -352,6 +378,8 @@ def git_add_remote(git_url) -> str:
 
 # dvc init with quiet option
 def dvc_quiet_init() -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['dvc', 'init', '-q'],
@@ -371,6 +399,8 @@ def dvc_quiet_init() -> str:
 
 # add repo in dvc
 def dvc_add_remote_repo(repo_type, repo_path) -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['dvc', 'remote', 'add', '-d', '-f', f"{repo_type}", f"{repo_path}"],
@@ -390,6 +420,8 @@ def dvc_add_remote_repo(repo_type, repo_path) -> str:
 
 # add repo related attributes in dvc
 def dvc_add_attribute(repo_type, attribute_type, attribute_value) -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['dvc', 'remote', 'modify', f"{repo_type}", f"{attribute_type}", f"{attribute_value}"],
@@ -410,6 +442,8 @@ def dvc_add_attribute(repo_type, attribute_type, attribute_value) -> str:
 
 # get dvc config
 def dvc_get_config() -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['dvc','config', '-l'],
@@ -430,6 +464,8 @@ def dvc_get_config() -> str:
 
 # dvc push
 def dvc_push() -> str:
+    if _CMF_EXPERIMENTAL_NO_GIT_DVC:
+        return ""
     commit = ""
     try:
         process = subprocess.Popen(['dvc', 'push'],

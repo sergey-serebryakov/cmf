@@ -55,6 +55,52 @@ from cmflib.metadata_helper import (
 from cmflib.utils.cmf_config import CmfConfig
 
 
+def get_connection_config(uri: str) -> mlpb.ConnectionConfig:
+    """Return connection config object for the given uri.
+
+    Args:
+        uri: URI connection string. If it starts with `mysql://`, the assumed structure is
+            `mysql://USER:PASSWORD@HOST:PORT/DATABASE`, else it's considered to be a path to sqlite DB.
+    Returns:
+        Connection config object for MLMD. Either `mysql` or `sqlite` is populated.
+    """
+    config = mlpb.ConnectionConfig()
+    if uri.startswith("mysql://"):
+        # https://dev.mysql.com/doc/refman/8.0/en/connecting-using-uri-or-key-value-pairs.html
+        # mysql://USER:PASSWORD@HOST:PORT/DATABASE
+
+        # get rid of mysql://
+        uri = uri[8:].strip()
+
+        # get database
+        parts = uri.split("/")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid mysql connection string ({uri})")
+        config.mysql.database = parts[1]
+
+        # get user:password and host:port
+        parts = parts[0].split("@")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid mysql connection string ({uri})")
+
+        # get user and password
+        user_password = parts[0].split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid mysql connection string ({uri})")
+        config.mysql.user = user_password[0]
+        config.mysql.password = user_password[1]
+
+        # get host and port
+        host_port = parts[1].split(":")
+        if len(parts) != 2:
+            raise ValueError(f"Invalid mysql connection string ({uri})")
+        config.mysql.host = host_port[0]
+        config.mysql.port = int(host_port[1])
+    else:
+        config.sqlite.filename_uri = uri
+    return config
+
+
 class Cmf:
     """This class provides methods to log metadata for distributed AI pipelines.
     The class instance creates an ML metadata store to store the metadata.
@@ -105,9 +151,7 @@ class Cmf:
             Cmf.__prechecks()
         if custom_properties is None:
             custom_properties = {}
-        config = mlpb.ConnectionConfig()
-        config.sqlite.filename_uri = filename
-        self.store = metadata_store.MetadataStore(config)
+        self.store = metadata_store.MetadataStore(get_connection_config(filename))
         self.filename = filename
         self.child_context = None
         self.execution = None
