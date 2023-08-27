@@ -202,6 +202,8 @@ class CmfConfig:
             self.pipeline_stage = other.pipeline_stage
         if other.graph is not None:
             self.graph = other.graph
+        if other.is_server is not None:
+            self.is_server = other.is_server
         return self
 
     @classmethod
