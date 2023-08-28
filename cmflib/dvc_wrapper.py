@@ -14,6 +14,7 @@
 # limitations under the License.
 ###
 
+import hashlib
 import os
 import subprocess
 import dvc.api
@@ -88,7 +89,7 @@ def dvc_get_url(folder: str, retry: bool = False, repo: str = "") -> str:
 
 def dvc_get_hash(folder: str, repo: str = "") -> str:
     if _CMF_EXPERIMENTAL_NO_GIT_DVC:
-        return ""
+        return hashlib.sha256(folder.strip().encode('utf-8')).hexdigest()
     c_hash = ""
     try:
         url = dvc_get_url(folder, False, repo)
