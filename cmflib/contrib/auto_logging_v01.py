@@ -333,7 +333,10 @@ def step(
             _ = cmf.create_execution(
                 execution_type=config.pipeline_stage, custom_properties=params
             )
-            _log_artifacts(cmf, "input", inputs)
+
+            uri_translator: t.Callable = _get_artifact_uri_translator()
+
+            _log_artifacts(cmf, "input", inputs, uri_translator)
 
             # Run the step
             if ctx is not None:
@@ -384,7 +387,7 @@ def step(
 
             # Log the output artifacts
             if outputs is not None:
-                _log_artifacts(cmf, "output", outputs)
+                _log_artifacts(cmf, "output", outputs, uri_translator)
 
             # Commit all metrics
             for metrics_name in cmf.metrics.keys():
@@ -642,28 +645,170 @@ def _log_artifacts(
         t.Set[Artifact],
         t.Dict[str, t.Union[Artifact, t.List[Artifact]]],
     ],
+    uri_translator: t.Optional[t.Callable[[str], str]] = None,
 ) -> None:
     """Log artifacts with Cmf.
     Args:
         cmf: Instance of initialized Cmf.
         event: One of `input` or `output` (whether these artifacts input or output artifacts).
         artifacts: Dictionary that maps artifacts names to artifacts. Names are not used, only artifacts.
+        uri_translator: Function that translates artifact URIs. If not provided, a Pass Through translator is used. This
+            callable takes a URI as provided by a user (or returned by a stage function), and returns a URI that will
+            be put into MLMD.
     """
+    if uri_translator is None:
+        uri_translator = _PassthroughUriTranslator()
+
     if isinstance(artifacts, dict):
         for artifact in artifacts.values():
-            _log_artifacts(cmf, event, artifact)
+            _log_artifacts(cmf, event, artifact, uri_translator)
     elif isinstance(artifacts, (list, tuple, set)):
         for artifact in artifacts:
-            _log_artifacts(cmf, event, artifact)
+            _log_artifacts(cmf, event, artifact, uri_translator)
     elif isinstance(artifacts, Dataset):
         cmf.log_dataset(
-            url=artifacts.uri, event=event, custom_properties=artifacts.params
+            url=uri_translator(artifacts.uri), event=event, custom_properties=artifacts.params
         )
     elif isinstance(artifacts, MLModel):
-        cmf.log_model(path=artifacts.uri, event=event, **artifacts.params)
+        cmf.log_model(path=uri_translator(artifacts.uri), event=event, **artifacts.params)
     elif isinstance(artifacts, ExecutionMetrics):
         cmf.log_execution_metrics(artifacts.name, artifacts.params)
     else:
         raise CMFError(
             f"Can't log unrecognized artifact: type={type(artifacts)}, artifacts={str(artifacts)}"
         )
+
+
+def _get_artifact_uri_translator() -> t.Callable[[str], str]:
+    """Return URI translator for artifacts' URIs.
+
+    Environment variable `CMF_ARTIFACT_URI_TRANSLATOR` is used to define translator type:
+        - `pachyderm`: Assume this runs in Pachyderm environment. URIs are translated to `pfs://REPO@COMMIT`.
+        - Non-empty string: a ';'-separated pairs of mappings that are separated with ':'. For example:
+          "/data/mnist/train:/mnt/train;/data/mnist/test:/mnt/test". This will replace "/mnt/train" with
+          "/data/mnist/train" and "/mnt/test" with "/data/mnist/test". These mappings define prefixes.
+
+    Returns:
+        A callable object that takes a URI and returns its modified version to be put into MLMD database.
+    """
+    uri_translator: str = (os.environ.get("CMF_ARTIFACT_URI_TRANSLATOR", None) or "").lower().strip()
+    if uri_translator in ("", "passthrough"):
+        return _PassthroughUriTranslator()
+
+    if uri_translator == "pachyderm":
+        return _PachydermUriTranslator()
+
+    return _PrefixBasedUriTranslator(uri_translator)
+
+
+class _PassthroughUriTranslator:
+    """URI translator that does not modify artifacts' URIs."""
+
+    def __call__(self, uri: str) -> str:
+        return uri
+
+
+class _PachydermUriTranslator:
+    """URI translator for Pachyderm pipelines."""
+    def __init__(self) -> None:
+        # https://docs.pachyderm.com/latest/set-up/environment-variables/
+        self.output_commit_id = (os.environ.get("PACH_OUTPUT_COMMIT_ID", None) or "").strip() or "unknown"
+        self.output_repository = (os.environ.get("PPS_PIPELINE_NAME", None) or "").strip() or "unknown"
+
+    def __call__(self, uri: str) -> str:
+        # uri can be one of "/pfs/out/..." or "/pfs/INPUT_REPO/...".
+        uri = uri.strip().rstrip("/")
+        if not uri.startswith("/pfs/"):
+            logger.warning("Invalid Pachyderm URI (%s).", uri)
+
+        if uri.startswith("/pfs/out") and (len(uri) == 8 or uri[8] == "/"):
+            output_uri = f"pfs://{self.output_repository}@{self.output_commit_id}"
+            prefix_len = 8
+        else:
+            parts = uri.split("/")
+            # According to `string.split` docs, when split char is not whitespace, empty strings are returned (and
+            # `uri` here must start with `/`. So we need to remove empty string.
+            del parts[0]
+            if len(parts) < 2:
+                logger.warning("Invalid Pachyderm URI (%s).", uri)
+                return uri
+            input_commit_id = (os.environ.get(parts[1] + "_COMMIT", None) or "").strip() or "unknown"
+            output_uri = f"pfs://{parts[1]}@{input_commit_id}"
+            prefix_len = 5 + len(parts[1])
+        if len(uri) > prefix_len:
+            output_uri = output_uri + uri[prefix_len:]
+
+        return output_uri
+
+
+class _PrefixBasedUriTranslator:
+    """Prefix-based URI translator for artifacts URIs.
+
+    Args:
+        specs: a ';'-separated pairs of mappings that are separated with ':'. For example:
+          "/data/mnist/train:/mnt/train;/data/mnist/test:/mnt/test". This will replace "/mnt/train" with
+          "/data/mnist/train" and "/mnt/test" with "/data/mnist/test". These mappings define prefixes.
+    """
+    def __init__(self, specs: str) -> None:
+        self.mappings: t.Dict[str, str] = {}
+        translations: t.List[str] = specs.split(";")
+        for translation in translations:
+            mapping: t.List[str] = translation.split(":")
+            if len(mapping) != 2:
+                raise CMFError(f"Invalid artifact uri mapping ({mapping}) in translation specs ({specs}).")
+            self.mappings[mapping[1]] = mapping[0]
+
+    def __call__(self, uri: str) -> str:
+        uri = uri.strip()
+        for source, target in self.mappings.items():
+            if uri.startswith(source):
+                return target + uri[len(source):]
+        logger.warning("No mappings for uri (%s). Known mappings: %s", uri, self.mappings)
+        return uri
+
+
+def test_pass_through_uri_translator() -> None:
+    _ = os.environ.pop("CMF_ARTIFACT_URI_TRANSLATOR", None)
+    translator: t.Callable = _get_artifact_uri_translator()
+    assert isinstance(translator, _PassthroughUriTranslator)
+
+    os.environ["CMF_ARTIFACT_URI_TRANSLATOR"] = "passthrough"
+    translator = _get_artifact_uri_translator()
+    assert isinstance(translator, _PassthroughUriTranslator)
+
+    assert translator("/pfs/out") == "/pfs/out"
+    assert translator("/pfs/iris/") == "/pfs/iris/"
+
+
+def test_prefix_based_uri_translator() -> None:
+    os.environ["CMF_ARTIFACT_URI_TRANSLATOR"] = \
+        "/data/iris/preprocess:/dataset;/data/iris/train:/model;/data/iris/test:/output"
+    translator = _get_artifact_uri_translator()
+    assert isinstance(translator, _PrefixBasedUriTranslator)
+
+    assert len(translator.mappings) == 3
+    assert translator.mappings["/dataset"] == "/data/iris/preprocess"
+    assert translator.mappings["/model"] == "/data/iris/train"
+    assert translator.mappings["/output"] == "/data/iris/test"
+
+
+def test_pachyderm_uri_translator() -> None:
+    os.environ["PACH_OUTPUT_COMMIT_ID"] = "774bd483b0174995baf3282bb6a0c70f"
+    os.environ["PPS_PIPELINE_NAME"] = "test"
+    os.environ["preprocess_COMMIT"] = "d32b386551c64fafb4e9a67e0c4c52ea"
+    os.environ["train_COMMIT"] = "ced3482198e94f37af436664eb1fe517"
+
+    os.environ["CMF_ARTIFACT_URI_TRANSLATOR"] = "pachyderm"
+    translator = _get_artifact_uri_translator()
+    assert isinstance(translator, _PachydermUriTranslator)
+
+    assert translator.output_commit_id == "774bd483b0174995baf3282bb6a0c70f"
+    assert translator.output_repository == "test"
+
+    assert translator("/pfs/out") == "pfs://test@774bd483b0174995baf3282bb6a0c70f"
+    assert translator("/pfs/out/") == "pfs://test@774bd483b0174995baf3282bb6a0c70f"
+    assert translator("/pfs/out//") == "pfs://test@774bd483b0174995baf3282bb6a0c70f"
+    assert translator("/pfs/out/model.pkl") == "pfs://test@774bd483b0174995baf3282bb6a0c70f/model.pkl"
+
+    assert translator("/pfs/preprocess/") == "pfs://preprocess@d32b386551c64fafb4e9a67e0c4c52ea"
+    assert translator("/pfs/train/model.pkl") == "pfs://train@ced3482198e94f37af436664eb1fe517/model.pkl"
